@@ -193,9 +193,14 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="BattleHandler.cs" />
     <Compile Include="Models\CardModel.cs" />
+    <Compile Include="Models\HTTPRequest.cs" />
+    <Compile Include="Models\PlayerModel.cs" />
+    <Compile Include="Models\ThreadParams.cs" />
     <Compile Include="Models\UserDataModel.cs" />
     <Compile Include="Models\UserModel.cs" />
+    <Compile Include="Models\userStats.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
