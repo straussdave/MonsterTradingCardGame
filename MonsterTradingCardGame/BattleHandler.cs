@@ -1,7 +1,9 @@
-﻿using MonsterTradingCardGame.Models;
+﻿using Microsoft.Extensions.Logging;
+using MonsterTradingCardGame.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,8 +13,7 @@ namespace MonsterTradingCardGame
     internal class BattleHandler
     {
         public Queue<Player> WaitingPlayers = new Queue<Player>();
-        public List<string[]> BattleHistory = new List<string[]>();
-        public List<int> FinishedBattles = new List<int>();
+        public List<List<string>> BattleHistory = new List<List<string>>();
         public int Enqueue(Player player)
         {//will return the id of the battle which the user will join
             WaitingPlayers.Enqueue(player);
@@ -20,10 +21,13 @@ namespace MonsterTradingCardGame
         }
         public void Battle()
         {
+            int roundNr = 0;
+            List<string> battleLog = new List<string>
+            {
+                BattleHistory.Count.ToString()
+            };
             Player player1 = WaitingPlayers.Dequeue();
             Player player2 = WaitingPlayers.Dequeue();
-            Player winner = player1;
-            Player loser = player2;
 
             List<Card> player1Deck = new List<Card>();
             List<Card> player2Deck = new List<Card>();
@@ -38,35 +42,66 @@ namespace MonsterTradingCardGame
 
             var random = new Random();
 
-            int player1RandomCard = random.Next(player1Deck.Count);
-            Card player1FightingCard = player1Deck[player1RandomCard];
-
-            int player2RandomCard = random.Next(player2Deck.Count);
-            Card player2FightingCard = player2Deck[player2RandomCard];
-
-            
-
-            if(player1FightingCard.Damage > player2FightingCard.Damage)
+            while(roundNr <= 100)
             {
-                winner = player1;
-                loser = player2;
-                player1Deck.Add(player2FightingCard);
-                player2Deck.RemoveAt(player2RandomCard);
+                int player1Index = random.Next(player1Deck.Count);
+                Card player1FightingCard = player1Deck[player1Index];
+
+                int player2Index = random.Next(player2Deck.Count);
+                Card player2FightingCard = player2Deck[player2Index];
+
+                if (CalculateDamage(player1FightingCard, player2FightingCard) == player1FightingCard)
+                {
+                    string battleDescription =
+                        "Round " + roundNr + ": "
+                        + player1.Name + "'s card "
+                        + player1FightingCard.Name
+                        + "(" + player1FightingCard.Damage + " damage)"
+                        + " won against " + player2.Name + "'s card "
+                        + player2FightingCard.Name
+                        + "(" + player2FightingCard.Damage + " damage)";
+                    battleLog.Add(battleDescription);
+                    player1Deck.Add(player2FightingCard);
+                    player2Deck.RemoveAt(player2Index);
+                }
+                else if (CalculateDamage(player1FightingCard, player2FightingCard) == player2FightingCard)
+                {
+                    string battleDescription =
+                        "Round " + roundNr + ": "
+                        + player2.Name + "'s card "
+                        + player2FightingCard.Name
+                        + "(" + player2FightingCard.Damage + " damage)"
+                        + " won against " + player1.Name + "'s card "
+                        + player1FightingCard.Name
+                        + "(" + player1FightingCard.Damage + " damage)";
+                    battleLog.Add(battleDescription);
+                    player2Deck.Add(player1FightingCard);
+                    player1Deck.RemoveAt(player1Index);
+                }
+                roundNr++;
+
+                if (player1Deck.Count == 0)
+                {
+                    Console.WriteLine("Battle finished");
+                    battleLog.Add("result: " + player1.Name);
+                    BattleHistory.Add(battleLog);
+                    break;
+                }
+                else if (player2Deck.Count == 0)
+                {
+                    Console.WriteLine("Battle finished");
+                    battleLog.Add("result: " + player2.Name);
+                    BattleHistory.Add(battleLog);
+                    break;
+                }
+                else if (roundNr >= 100)
+                {
+                    Console.WriteLine("Battle finished");
+                    battleLog.Add("result: draw");
+                    BattleHistory.Add(battleLog);
+                    break;
+                }
             }
-            else if(player2FightingCard.Damage > player1FightingCard.Damage)
-            {
-                winner = player2;
-                loser = player1;
-                player2Deck.Add(player1FightingCard);
-                player1Deck.RemoveAt(player1RandomCard);
-            }
-
-
-
-            int battleId = BattleHistory.Count;
-            string[] new_entry = { battleId.ToString(), winner.Name , loser.Name};
-            FinishedBattles.Add(battleId);
-            BattleHistory.Add(new_entry);
         }
 
         public Card CalculateDamage(Card card1, Card card2)
@@ -303,9 +338,7 @@ namespace MonsterTradingCardGame
                         break;
                 }
             }
-
-            
-                
+            return null;
         }
 
         public string GetElement(Card card)
@@ -330,7 +363,14 @@ namespace MonsterTradingCardGame
 
         public string GetType(Card card, string element)
         {
-            return card.Name.Substring(element.Length);
+            if(!card.Name.Contains("Fire") || !card.Name.Contains("Water") || !card.Name.Contains("Regular"))
+            {
+                return card.Name;
+            }
+            else
+            {
+                return card.Name.Substring(element.Length);
+            }
         }
 
     }

@@ -24,11 +24,14 @@ using MonsterTradingCardGame;
 using System.Runtime.InteropServices;
 using System.Net.Sockets;
 using System.Runtime.InteropServices.ComTypes;
+using System.Diagnostics.Metrics;
 
 namespace HttpServer
 {
     class Program
     {
+        static readonly object _locker = new object();
+
         static void Main()
         {
             IDbConnection connection = new NpgsqlConnection("Host=localhost;Username=postgres;Password=011001;Database=postgres");
@@ -51,8 +54,6 @@ namespace HttpServer
                 Thread t = new Thread(() => HandleClient(args));
                 t.Start();
             }
-            connection.Close();
-            listener.Stop();
         }
 
         static void HandleClient(object args)
@@ -913,7 +914,7 @@ namespace HttpServer
 
                         List<Card> deck = new List<Card>();
                         bool hasCards = false;
-
+                        
                         using (IDataReader reader = c.ExecuteReader())
                         {
                             while (reader.Read())
@@ -933,7 +934,7 @@ namespace HttpServer
                             break;
                         }
                         Player player = new Player();
-                        string winner = "";
+                        List<string> log = new List<string>();
                         player.Name = user;
                         player.Deck = deck;
                         bool found = false;
@@ -942,21 +943,58 @@ namespace HttpServer
                         while (true)
                         {
                             Thread.Sleep(1000);
-                            if (battleHandler.FinishedBattles.Contains(battleId))
+
+                            foreach (List<string> battleLog in battleHandler.BattleHistory)
                             {
-                                foreach (string[] result in battleHandler.BattleHistory)
+                                if (battleLog.ElementAt(0) == battleId.ToString())
                                 {
-                                    if (Int32.Parse(result[0]) == battleId)
-                                    {
-                                        winner = result[1];
-                                        found = true;
-                                        break;
-                                    }
+                                    found = true;
+                                    response.ResponseContent = JsonConvert.SerializeObject(battleLog, Formatting.Indented);
+                                    log = battleLog; break;
                                 }
-                                if (found)
-                                    break;
                             }
+                            if (found)
+                                break;
                         }
+
+                        if(log.Contains("result: draw")) //draw
+                        {
+                            Console.WriteLine("result is draw");
+                            response.StatusCode = (int)HttpStatusCode.OK;
+                            response.Message = "The battle has been carried out successfully.";
+                            break;
+                        }
+                        else if(log.Contains("result: " + user)) //win
+                        {
+                            lock (_locker)
+                            {
+                                c.CommandText = "UPDATE users SET elo = elo + 3, wins = wins + 1 WHERE uid = @useridParam";
+                                IDbDataParameter useridParam = c.CreateParameter();
+                                useridParam.DbType = DbType.Int32;
+                                useridParam.ParameterName = "useridParam";
+                                c.Parameters.Add(useridParam);
+                                c.Parameters["useridParam"].Value = userid;
+
+                                c.ExecuteNonQuery();
+                            }
+                            
+                        }
+                        else //lose
+                        {
+                            lock (_locker)
+                            {
+                                c.CommandText = "UPDATE users SET elo = elo - 5, losses = losses + 1 WHERE uid = @useridParam";
+                                IDbDataParameter useridParam = c.CreateParameter();
+                                useridParam.DbType = DbType.Int32;
+                                useridParam.ParameterName = "useridParam";
+                                c.Parameters.Add(useridParam);
+                                c.Parameters["useridParam"].Value = userid;
+
+                                c.ExecuteNonQuery();
+                            }
+                            
+                        }
+
                         response.StatusCode = (int)HttpStatusCode.OK;
                         response.Message = "The battle has been carried out successfully.";
                         break;
@@ -1087,9 +1125,9 @@ namespace HttpServer
                 Thread.Sleep(500);
                 if (bh.WaitingPlayers.Count >= 2)
                 {
+                    Console.WriteLine("start battle");
                     bh.Battle();
                 }
-                Console.Write(bh.WaitingPlayers.Count);
             }
         }
 
@@ -1123,10 +1161,11 @@ namespace HttpServer
                 else
                     return false;
             }
-            catch(NullReferenceException e){
+            catch (NullReferenceException e)
+            {
                 return false;
             }
-            
+
         }
 
         static bool Authorize(HTTPRequest request, string username)
