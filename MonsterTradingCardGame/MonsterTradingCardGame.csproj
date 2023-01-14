@@ -196,6 +196,7 @@
     <Compile Include="BattleHandler.cs" />
     <Compile Include="Models\CardModel.cs" />
     <Compile Include="Models\HTTPRequest.cs" />
+    <Compile Include="Models\HTTPResponse.cs" />
     <Compile Include="Models\PlayerModel.cs" />
     <Compile Include="Models\ThreadParams.cs" />
     <Compile Include="Models\UserDataModel.cs" />
