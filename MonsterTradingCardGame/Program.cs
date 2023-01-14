@@ -23,6 +23,7 @@ using System.Runtime.Remoting.Contexts;
 using MonsterTradingCardGame;
 using System.Runtime.InteropServices;
 using System.Net.Sockets;
+using System.Runtime.InteropServices.ComTypes;
 
 namespace HttpServer
 {
@@ -30,104 +31,60 @@ namespace HttpServer
     {
         static void Main()
         {
+            IDbConnection connection = new NpgsqlConnection("Host=localhost;Username=postgres;Password=011001;Database=postgres");
+            connection.Open();
+
             TcpListener listener = new TcpListener(IPAddress.Any, 10001);
             listener.Start();
             Console.WriteLine("Listening for incoming connections...");
-
-            // Wait for a client to connect
-            TcpClient client = listener.AcceptTcpClient();
-            Console.WriteLine("Client connected!");
-
-            // Get the client's stream
-            NetworkStream stream = client.GetStream();
-            byte[] buffer = new byte[4096];
-            int bytesRead = stream.Read(buffer, 0, buffer.Length);
-            string request = Encoding.ASCII.GetString(buffer, 0, bytesRead);
-            Console.Write(request);
-            HTTPRequest req = new HTTPRequest(request);
-
-            var lines = request.Split('\n');
-
-            var line = lines[0];
-            var lineSplit = line.Split(' ');
-            req.Method = lineSplit[0];
-            req.Url = lineSplit[1];
-            req.Version = lineSplit[2];
-
-            line = lines[1];
-            lineSplit = line.Split(' ');
-            req.Host = lineSplit[1];
-
-            line = lines[5];
-            lineSplit = line.Split(':');
-            req.Authorization = lineSplit[1].Substring(1);
-
-            line = lines[6];
-            lineSplit = line.Split(' ');
-            req.ContentLength = Int32.Parse(lineSplit[1]);
-
-            line = lines[8];
-            req.Body = line;
-
-            Console.Write("\n"req.Body);
-
-            // Send a response to the client
-            string response = "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nHello World!";
-            byte[] responseBytes = Encoding.ASCII.GetBytes(response);
-            stream.Write(responseBytes, 0, responseBytes.Length);
-
-            // Close the client connection
-            client.Close();
-            listener.Stop();
-        }
-    }
-}
-        /*
-            IDbConnection connection = new NpgsqlConnection("Host=localhost;Username=postgres;Password=011001;Database=postgres");
-            
-            HttpListener listener = new HttpListener();
-            listener.Prefixes.Add("http://+:10001/");
-            listener.Start();
-            Console.WriteLine("Listening for requests...");
             BattleHandler bh = new BattleHandler();
-            Thread thread = new Thread(() => HandleBattles(bh));
-            thread.Start();
+            Thread battleThread = new Thread(() => HandleBattles(bh));
+            battleThread.Start();
 
             while (true)
             {
-                // Wait for a request to be made
-                HttpListenerContext context = listener.GetContext();
-                object args = new object[3] { context, connection, bh };
+                // Wait for a client to connect
+                TcpClient client = listener.AcceptTcpClient();
+                Console.WriteLine("Client connected!");
+
+                object args = new object[3] { connection, bh, client };
                 Thread t = new Thread(() => HandleClient(args));
                 t.Start();
             }
+            connection.Close();
+            listener.Stop();
         }
 
         static void HandleClient(object args)
         {
             Array argArray = new object[3];
             argArray = (Array)args;
-            IDbConnection connection = (IDbConnection)argArray.GetValue(1);
-            connection.Open();
-            HttpListenerContext context = (HttpListenerContext)argArray.GetValue(0);
-            // Get the request and response objects
-            HttpListenerRequest request = context.Request;
-            HttpListenerResponse response = context.Response;
+            IDbConnection connection = (IDbConnection)argArray.GetValue(0);
 
-            BattleHandler battleHandler = (BattleHandler)argArray.GetValue(2);
+            BattleHandler battleHandler = (BattleHandler)argArray.GetValue(1);
 
-            string responseContent = "";
+            TcpClient client = (TcpClient)argArray.GetValue(2);
+
+            // Get the client's stream
+            NetworkStream stream = client.GetStream();
+            byte[] buffer = new byte[4096];
+            int bytesRead = stream.Read(buffer, 0, buffer.Length);
+            string req = Encoding.ASCII.GetString(buffer, 0, bytesRead);
+            HTTPRequest request = new HTTPRequest(req);
+
+            HTTPResponse response = new HTTPResponse();
+            response.ResponseContent = "";
             // Determine the HTTP verb of the request
-            if (request.RawUrl == "/users")
+            if (request.Url == "/users")
             {
-                switch (request.HttpMethod)
+                switch (request.Method)
                 {
                     case "POST": //register a new user
 
                         //get username and password from request body
                         //insert new user into db
 
-                        string userJson = GetRequestData(request);
+                        string userJson = request.Body;
                         User user = JsonConvert.DeserializeObject<User>(userJson);
 
                         IDbCommand command = connection.CreateCommand();
@@ -150,7 +107,7 @@ namespace HttpServer
                             {
                                 // A user with this username already exists
                                 response.StatusCode = (int)HttpStatusCode.Conflict;
-                                response.StatusDescription = "User with same username already registered";
+                                response.Message = "User with same username already registered";
                             }
                             else
                             {
@@ -170,7 +127,7 @@ namespace HttpServer
                                 c.ExecuteNonQuery();
 
                                 response.StatusCode = (int)HttpStatusCode.Created;
-                                response.StatusDescription = "User successfully created";
+                                response.Message = "User successfully created";
 
                             }
                         }
@@ -178,21 +135,21 @@ namespace HttpServer
                     default:
                         // Return an error for other HTTP verbs
                         response.StatusCode = (int)HttpStatusCode.BadRequest;
-                        response.StatusDescription = "Unsupported HTTP Verb";
+                        response.Message = "Unsupported HTTP Verb";
                         break;
                 }
             }
-            else if (request.RawUrl.StartsWith("/users/"))
+            else if (request.Url.StartsWith("/users/"))
             {
-                string username = request.RawUrl.Substring(7);
+                string username = request.Url.Substring(7);
                 UserData userData = new UserData();
-                switch (request.HttpMethod)
+                switch (request.Method)
                 {
                     case "GET": //Retrieve user data for the given username
                         if (!Authorize(request, username))
                         {
                             response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                            response.StatusDescription = "Access token is missing or invalid";
+                            response.Message = "Access token is missing or invalid";
                             break;
                         }
 
@@ -214,7 +171,7 @@ namespace HttpServer
                             {
                                 // No match found
                                 response.StatusCode = (int)HttpStatusCode.NotFound;
-                                response.StatusDescription = "User not found";
+                                response.Message = "User not found";
                                 break;
                             }
                             else
@@ -228,21 +185,21 @@ namespace HttpServer
                                 userData.Name = name;
                                 userData.Image = image;
 
-                                responseContent = JsonConvert.SerializeObject(userData);
+                                response.ResponseContent = JsonConvert.SerializeObject(userData);
 
                                 response.StatusCode = (int)HttpStatusCode.OK;
-                                response.StatusDescription = "Data sucessfully retrieved";
+                                response.Message = "Data sucessfully retrieved";
                             }
                         }
                         break;
                     case "PUT": //Updates user data for given username
-                        string userDataJson = GetRequestData(request);
+                        string userDataJson = request.Body;
                         userData = JsonConvert.DeserializeObject<UserData>(userDataJson);
 
                         if (!Authorize(request, username))
                         {
                             response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                            response.StatusDescription = "Access token is missing or invalid";
+                            response.Message = "Access token is missing or invalid";
                             break;
                         }
 
@@ -264,7 +221,7 @@ namespace HttpServer
                             {
                                 // No match found
                                 response.StatusCode = (int)HttpStatusCode.NotFound;
-                                response.StatusDescription = "User not found";
+                                response.Message = "User not found";
                                 break;
                             }
                             else
@@ -298,23 +255,23 @@ namespace HttpServer
                                 c.ExecuteNonQuery();
 
                                 response.StatusCode = (int)HttpStatusCode.OK;
-                                response.StatusDescription = "User sucessfully updated.";
+                                response.Message = "User sucessfully updated.";
                             }
                         }
                         break;
                     default:
                         // Return an error for other HTTP verbs
                         response.StatusCode = (int)HttpStatusCode.BadRequest;
-                        response.StatusDescription = "Unsupported HTTP Verb";
+                        response.Message = "Unsupported HTTP Verb";
                         break;
                 }
             }
-            else if (request.RawUrl == "/sessions") //Login with existing user
+            else if (request.Url == "/sessions") //Login with existing user
             {
-                switch (request.HttpMethod)
+                switch (request.Method)
                 {
                     case "POST":
-                        string userJson = GetRequestData(request);
+                        string userJson = request.Body;
                         User user = JsonConvert.DeserializeObject<User>(userJson);
                         IDbCommand command = connection.CreateCommand();
                         //check if user exists
@@ -345,49 +302,49 @@ namespace HttpServer
                             {
                                 // Match found
                                 response.StatusCode = (int)HttpStatusCode.OK;
-                                response.StatusDescription = "User login successful";
-                                responseContent = user.username + "-mtcgToken";
+                                response.Message = "User login successful";
+                                response.ResponseContent = user.username + "-mtcgToken";
                                 response.ContentType = "json/application";
                             }
                             else
                             {
                                 // No match found
                                 response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                                response.StatusDescription = "Invalid username/password provided";
+                                response.Message = "Invalid username/password provided";
                             }
                         }
                         break;
                     default:
                         response.StatusCode = (int)HttpStatusCode.BadRequest;
-                        response.StatusDescription = "Unsupported HTTP Verb";
+                        response.Message = "Unsupported HTTP Verb";
                         break;
                 }
             }
-            else if (request.RawUrl == "/packages")
+            else if (request.Url == "/packages")
             {
-                switch (request.HttpMethod)
+                switch (request.Method)
                 {
                     case "POST":
                         //Get data from request, store all 5 cards from request in cards table with the same package number, 
                         //get highest package number from table and increment it by 1
 
-                        if (request.Headers["Authorization"] != null && request.Headers["Authorization"].StartsWith("Bearer"))
+                        if (request.Authorization != null && request.Authorization.StartsWith("Bearer"))
                         {
                             if (!AuthorizeAdmin(request, true))
                             {
                                 response.StatusCode = (int)HttpStatusCode.Forbidden;
-                                response.StatusDescription = "Provided user is not \"admin\"";
+                                response.Message = "Provided user is not \"admin\"";
                                 break;
                             }
                         }
                         else
                         {
                             response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                            response.StatusDescription = "Access token is missing or invalid";
+                            response.Message = "Access token is missing or invalid";
                             break;
                         }
 
-                        string packagesJson = GetRequestData(request);
+                        string packagesJson = request.Body;
                         Console.WriteLine(packagesJson);
                         Card[] cards = JsonConvert.DeserializeObject<Card[]>(packagesJson);
 
@@ -423,7 +380,7 @@ namespace HttpServer
                         if (error == true)
                         {
                             response.StatusCode = (int)HttpStatusCode.Conflict;
-                            response.StatusDescription = "At least one card in the packages already exists";
+                            response.Message = "At least one card in the packages already exists";
                             break;
                         }
 
@@ -502,21 +459,21 @@ namespace HttpServer
                         if (error == true)
                         {
                             response.StatusCode = (int)HttpStatusCode.InternalServerError;
-                            response.StatusDescription = "error unknown";
+                            response.Message = "error unknown";
                             break;
                         }
                         response.StatusCode = (int)HttpStatusCode.Created;
-                        response.StatusDescription = "Package and cards successfully created";
+                        response.Message = "Package and cards successfully created";
                         break;
                     default:
                         response.StatusCode = (int)HttpStatusCode.BadRequest;
-                        response.StatusDescription = "Unsupported HTTP Verb";
+                        response.Message = "Unsupported HTTP Verb";
                         break;
                 }
             }
-            else if (request.RawUrl == "/transactions/packages")
+            else if (request.Url == "/transactions/packages")
             {
-                switch (request.HttpMethod)
+                switch (request.Method)
                 {
                     case "POST":
                         //Buys a card package with the money of the provided user
@@ -528,11 +485,11 @@ namespace HttpServer
                         if (!Authorize(request))
                         {
                             response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                            response.StatusDescription = "Access token is missing or invalid";
+                            response.Message = "Access token is missing or invalid";
                             break;
                         }
 
-                        string header = request.Headers["Authorization"];
+                        string header = request.Authorization;
                         int startOfToken = header.IndexOf("Bearer ") + 7;
                         string user = header.Substring(startOfToken, header.IndexOf("-") - startOfToken);
 
@@ -561,7 +518,7 @@ namespace HttpServer
                             {
                                 //no rows found
                                 response.StatusCode = (int)HttpStatusCode.NotFound;
-                                response.StatusDescription = "No user found";
+                                response.Message = "No user found";
                                 break;
                             }
                         }
@@ -583,7 +540,7 @@ namespace HttpServer
                                 {
                                     //no rows found
                                     response.StatusCode = (int)HttpStatusCode.NotFound;
-                                    response.StatusDescription = "No card package available for buying";
+                                    response.Message = "No card package available for buying";
                                     break;
                                 }
                             }
@@ -645,36 +602,36 @@ namespace HttpServer
                             c.ExecuteNonQuery();
 
                             response.StatusCode = (int)HttpStatusCode.Created;
-                            response.StatusDescription = "A package has been successfully bought";
+                            response.Message = "A package has been successfully bought";
                         }
                         else
                         {
                             response.StatusCode = (int)HttpStatusCode.Forbidden;
-                            response.StatusDescription = "Not enough money for buying a card package";
+                            response.Message = "Not enough money for buying a card package";
                             break;
                         }
 
                         break;
                     default:
                         response.StatusCode = (int)HttpStatusCode.BadRequest;
-                        response.StatusDescription = "Unsupported HTTP Verb";
+                        response.Message = "Unsupported HTTP Verb";
                         break;
                 }
             }
-            else if (request.RawUrl == "/cards")
+            else if (request.Url == "/cards")
             {
-                switch (request.HttpMethod)
+                switch (request.Method)
                 {
                     case "GET":
 
                         if (!Authorize(request))
                         {
                             response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                            response.StatusDescription = "Access token is missing or invalid";
+                            response.Message = "Access token is missing or invalid";
                             break;
                         }
 
-                        string header = request.Headers["Authorization"];
+                        string header = request.Authorization;
                         int startOfToken = header.IndexOf("Bearer ") + 7;
                         string user = header.Substring(startOfToken, header.IndexOf("-") - startOfToken);
                         List<Card> cards = new List<Card>();
@@ -718,22 +675,22 @@ namespace HttpServer
                         if (!hasCards)
                         {
                             response.StatusCode = (int)HttpStatusCode.NoContent;
-                            response.StatusDescription = "The request was fine, but the user doesn't have any cards";
+                            response.Message = "The request was fine, but the user doesn't have any cards";
                             break;
                         }
-                        responseContent = JsonConvert.SerializeObject(cards, Formatting.Indented);
+                        response.ResponseContent = JsonConvert.SerializeObject(cards, Formatting.Indented);
                         response.StatusCode = (int)HttpStatusCode.OK;
-                        response.StatusDescription = "The user has cards, the response contains these";
+                        response.Message = "The user has cards, the response contains these";
                         break;
                     default:
                         response.StatusCode = (int)HttpStatusCode.BadRequest;
-                        response.StatusDescription = "Unsupported HTTP Verb";
+                        response.Message = "Unsupported HTTP Verb";
                         break;
                 }
             }
-            else if (request.RawUrl.StartsWith("/deck"))
+            else if (request.Url.StartsWith("/deck"))
             {
-                switch (request.HttpMethod)
+                switch (request.Method)
                 {
                     case "PUT":
                         //Send four card IDs to configure a new full deck. A failed request will not change the previously defined deck.
@@ -741,11 +698,11 @@ namespace HttpServer
                         if (!Authorize(request))
                         {
                             response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                            response.StatusDescription = "Access token is missing or invalid";
+                            response.Message = "Access token is missing or invalid";
                             break;
                         }
 
-                        string cardIds = GetRequestData(request);
+                        string cardIds = request.Body;
                         List<string> cardList = cardIds.Split(',').ToList();
                         List<string> cardListTrimmed = new List<string>();
                         foreach (string cardId in cardList)
@@ -756,13 +713,13 @@ namespace HttpServer
                         if (cardListTrimmed.Count < 4 || cardListTrimmed.Count > 4)
                         {
                             response.StatusCode = (int)HttpStatusCode.BadRequest;
-                            response.StatusDescription = "The provided deck did not include the required amount of cards";
+                            response.Message = "The provided deck did not include the required amount of cards";
                             break;
                         }
 
                         //check if user is owner of these cards
 
-                        string header = request.Headers["Authorization"];
+                        string header = request.Authorization;
                         int startOfToken = header.IndexOf("Bearer ") + 7;
                         string user = header.Substring(startOfToken, header.IndexOf("-") - startOfToken);
 
@@ -804,7 +761,7 @@ namespace HttpServer
                             {
                                 error = true;
                                 response.StatusCode = (int)HttpStatusCode.Forbidden;
-                                response.StatusDescription = "At least one of the provided cards does not belong to the user or is not available.";
+                                response.Message = "At least one of the provided cards does not belong to the user or is not available.";
                                 break;
                             }
                         }
@@ -828,18 +785,18 @@ namespace HttpServer
                         }
 
                         response.StatusCode = (int)HttpStatusCode.OK;
-                        response.StatusDescription = "The deck has been successfully configured";
+                        response.Message = "The deck has been successfully configured";
                         break;
                     case "GET":
                         //Returns the cards that are owned by the users and are put into the deck
                         if (!Authorize(request))
                         {
                             response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                            response.StatusDescription = "Access token is missing or invalid";
+                            response.Message = "Access token is missing or invalid";
                             break;
                         }
 
-                        header = request.Headers["Authorization"];
+                        header = request.Authorization;
                         startOfToken = header.IndexOf("Bearer ") + 7;
                         user = header.Substring(startOfToken, header.IndexOf("-") - startOfToken);
 
@@ -882,43 +839,40 @@ namespace HttpServer
                         if (!hasCards)
                         {
                             response.StatusCode = (int)HttpStatusCode.NoContent;
-                            response.StatusDescription = "The request was fine, but the deck doesn't have any cards";
+                            response.Message = "The request was fine, but the deck doesn't have any cards";
                             break;
                         }
 
-                        string[] keys = request.QueryString.AllKeys;
-                        if (keys.Length > 0)
+                        string queryString = request.QueryString;
+                        if (queryString == "format=plain")
                         {
-                            if (request.QueryString.GetValues(keys[0])[0] == "plain")
+                            int i = 0;
+                            foreach (Card card in deck)
                             {
-                                int i = 0;
-                                foreach (Card card in deck)
-                                {
-                                    responseContent += deck.ElementAt(i).Id + '\n';
-                                    responseContent += deck.ElementAt(i).Name + '\n';
-                                    responseContent += deck.ElementAt(i).Damage.ToString() + '\n';
-                                    i++;
-                                }
-
-                                response.StatusCode = (int)HttpStatusCode.OK;
-                                response.StatusDescription = "The deck has cards, the response contains these";
-                                break;
+                                response.ResponseContent += deck.ElementAt(i).Id + '\n';
+                                response.ResponseContent += deck.ElementAt(i).Name + '\n';
+                                response.ResponseContent += deck.ElementAt(i).Damage.ToString() + '\n';
+                                i++;
                             }
+
+                            response.StatusCode = (int)HttpStatusCode.OK;
+                            response.Message = "The deck has cards, the response contains these";
+                            break;
                         }
 
-                        responseContent = JsonConvert.SerializeObject(deck, Formatting.Indented);
+                        response.ResponseContent = JsonConvert.SerializeObject(deck, Formatting.Indented);
                         response.StatusCode = (int)HttpStatusCode.OK;
-                        response.StatusDescription = "The deck has cards, the response contains these";
+                        response.Message = "The deck has cards, the response contains these";
                         break;
                     default:
                         response.StatusCode = (int)HttpStatusCode.BadRequest;
-                        response.StatusDescription = "Unsupported HTTP Verb";
+                        response.Message = "Unsupported HTTP Verb";
                         break;
                 }
             }
-            else if (request.RawUrl == "/battles")
+            else if (request.Url == "/battles")
             {
-                switch (request.HttpMethod)
+                switch (request.Method)
                 {
                     case "POST":
                         Console.WriteLine("Battle request");
@@ -928,10 +882,10 @@ namespace HttpServer
                         if (!Authorize(request))
                         {
                             response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                            response.StatusDescription = "Access token is missing or invalid";
+                            response.Message = "Access token is missing or invalid";
                             break;
                         }
-                        string header = request.Headers["Authorization"];
+                        string header = request.Authorization;
                         int startOfToken = header.IndexOf("Bearer ") + 7;
                         string user = header.Substring(startOfToken, header.IndexOf("-") - startOfToken);
 
@@ -975,7 +929,7 @@ namespace HttpServer
                         if (!hasCards)
                         {
                             response.StatusCode = (int)HttpStatusCode.NoContent;
-                            response.StatusDescription = "The request was fine, but the deck doesn't have any cards";
+                            response.Message = "The request was fine, but the deck doesn't have any cards";
                             break;
                         }
                         Player player = new Player();
@@ -1001,28 +955,28 @@ namespace HttpServer
                                 }
                                 if (found)
                                     break;
-                                Console.WriteLine("Waiting");
                             }
                         }
-                        Console.WriteLine(winner);
+                        response.StatusCode = (int)HttpStatusCode.OK;
+                        response.Message = "The battle has been carried out successfully.";
                         break;
                     default:
                         break;
                 }
             }
-            else if (request.RawUrl == "/stats")
+            else if (request.Url == "/stats")
             {
-                switch (request.HttpMethod)
+                switch (request.Method)
                 {
                     case "GET":
                         //Retrieves the stats for the requesting user.
                         if (!Authorize(request))
                         {
                             response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                            response.StatusDescription = "Access token is missing or invalid";
+                            response.Message = "Access token is missing or invalid";
                             break;
                         }
-                        string header = request.Headers["Authorization"];
+                        string header = request.Authorization;
                         int startOfToken = header.IndexOf("Bearer ") + 7;
                         string user = header.Substring(startOfToken, header.IndexOf("-") - startOfToken);
 
@@ -1044,7 +998,7 @@ namespace HttpServer
                             {
                                 // No match found
                                 response.StatusCode = (int)HttpStatusCode.NotFound;
-                                response.StatusDescription = "User not found";
+                                response.Message = "User not found";
                                 break;
                             }
                             else
@@ -1060,10 +1014,10 @@ namespace HttpServer
                                 stats.Wins = wins;
                                 stats.Losses = losses;
 
-                                responseContent = JsonConvert.SerializeObject(stats);
+                                response.ResponseContent = JsonConvert.SerializeObject(stats);
 
                                 response.StatusCode = (int)HttpStatusCode.OK;
-                                response.StatusDescription = "The stats could be retrieved successfully.";
+                                response.Message = "The stats could be retrieved successfully.";
                             }
                         }
                         break;
@@ -1071,16 +1025,16 @@ namespace HttpServer
                         break;
                 }
             }
-            else if (request.RawUrl == "/score")
+            else if (request.Url == "/score")
             {
-                switch (request.HttpMethod)
+                switch (request.Method)
                 {
                     case "GET":
                         //Lists all users ordered by elo
                         if (!Authorize(request))
                         {
                             response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                            response.StatusDescription = "Access token is missing or invalid";
+                            response.Message = "Access token is missing or invalid";
                             break;
                         }
                         IDbCommand command = connection.CreateCommand();
@@ -1091,7 +1045,7 @@ namespace HttpServer
                         List<string[]> scoreboard = new List<string[]>();
                         using (IDataReader reader = c.ExecuteReader())
                         {
-                            while(reader.Read())
+                            while (reader.Read())
                             {
                                 string[] new_entry = { reader["name"].ToString(), reader["elo"].ToString() };
                                 if (reader["name"].ToString() == "")
@@ -1101,51 +1055,41 @@ namespace HttpServer
                                 scoreboard.Add(new_entry);
                             }
                         }
-                        responseContent = JsonConvert.SerializeObject(scoreboard, Formatting.Indented);
+                        response.ResponseContent = JsonConvert.SerializeObject(scoreboard, Formatting.Indented);
                         response.StatusCode = (int)HttpStatusCode.OK;
-                        response.StatusDescription = "The stats could be retrieved successfully.";
+                        response.Message = "The stats could be retrieved successfully.";
                         break;
                     default:
                         break;
                 }
             }
 
-            connection.Close();
-            //Set the response content and content type
-            byte[] buffer = Encoding.UTF8.GetBytes(responseContent);
-            response.ContentLength64 = buffer.Length;
+            // Send a response to the client
+            string responseString = "";
+            responseString = request.Version + " "
+                + response.StatusCode + " "
+                + "\r\nContent-Length: "
+                + (response.ResponseContent.Length + response.Message.Length).ToString()
+                + "\r\n\r\n" + response.Message
+                + "\r\n\r\n" + response.ResponseContent;
 
-            // Send the response to the client
-            Stream output = response.OutputStream;
-            output.Write(buffer, 0, buffer.Length);
-            output.Close();
+            byte[] responseBytes = Encoding.ASCII.GetBytes(responseString);
+            stream.Write(responseBytes, 0, responseBytes.Length);
+
+            // Close the client connection
+            client.Close();
         }
 
         static public void HandleBattles(BattleHandler bh)
         {
             while (true)
             {
-                Thread.Sleep(250);
-                if(bh.WaitingPlayers.Count >= 2)
+                Thread.Sleep(500);
+                if (bh.WaitingPlayers.Count >= 2)
                 {
                     bh.Battle();
                 }
                 Console.Write(bh.WaitingPlayers.Count);
-            }
-        }
-
-        public static string GetRequestData(HttpListenerRequest request)
-        {
-            if (!request.HasEntityBody)
-            {
-                return null;
-            }
-            using (Stream body = request.InputStream) // here we have data
-            {
-                using (var reader = new StreamReader(body, request.ContentEncoding))
-                {
-                    return reader.ReadToEnd();
-                }
             }
         }
 
@@ -1167,20 +1111,27 @@ namespace HttpServer
             }
         }
 
-        static bool Authorize(HttpListenerRequest request)
+        static bool Authorize(HTTPRequest request)
         {
-            string authToken = request.Headers["Authorization"];
-            if (authToken.StartsWith("B"))
+            try
             {
-                return true;
+                string authToken = request.Authorization;
+                if (authToken.StartsWith("B"))
+                {
+                    return true;
+                }
+                else
+                    return false;
             }
-            else
+            catch(NullReferenceException e){
                 return false;
+            }
+            
         }
 
-        static bool Authorize(HttpListenerRequest request, string username)
+        static bool Authorize(HTTPRequest request, string username)
         {
-            string authToken = request.Headers["Authorization"];
+            string authToken = request.Authorization;
             if (authToken.StartsWith("B"))
             {
                 authToken = authToken.Substring(7);
@@ -1193,9 +1144,9 @@ namespace HttpServer
                 return false;
         }
 
-        static bool AuthorizeAdmin(HttpListenerRequest request, bool checkAdmin)
+        static bool AuthorizeAdmin(HTTPRequest request, bool checkAdmin)
         {
-            string authToken = request.Headers["Authorization"];
+            string authToken = request.Authorization;
             if (authToken.StartsWith("B"))
             {
                 authToken = authToken.Substring(7);
@@ -1209,4 +1160,3 @@ namespace HttpServer
         }
     }
 }
-        */

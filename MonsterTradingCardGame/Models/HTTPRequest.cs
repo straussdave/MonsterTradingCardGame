@@ -11,28 +11,64 @@ namespace MonsterTradingCardGame.Models
 
         public HTTPRequest(string req) 
         {
-            var lines = req.Split('\n');
+            string[] lines = req.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
 
-            var line = lines[0];
-            var lineSplit = line.Split(' ');
-            this.Method = lineSplit[0];
-            this.Url = lineSplit[1];
-            this.Version = lineSplit[2];
-
-            line = lines[1];
-            lineSplit = line.Split(' ');
-            this.Host = lineSplit[1];
-
-            line = lines[5];
-            lineSplit = line.Split(':');
-            this.Authorization = lineSplit[1].Substring(1);
-
-            line = lines[6];
-            lineSplit = line.Split(' ');
-            this.ContentLength = Int32.Parse(lineSplit[1]);
-
-            line = lines[8];
-            this.Body = line;
+            int i = 0;
+            foreach(var l in lines)
+            {
+                if(i == 0)
+                {
+                    var lineSplit = l.Split(' ');
+                    this.Method = lineSplit[0];
+                    this.Url = lineSplit[1];
+                    this.QueryString = "";
+                    if (this.Url.Contains("?"))
+                    {
+                        var urlSplit = this.Url.Split('?');
+                        this.Url = urlSplit[0];
+                        this.QueryString = urlSplit[1];
+                    }
+                    this.Version = lineSplit[2];
+                }
+                else
+                {
+                    if (l.Contains("Host"))
+                    {
+                        var lineSplit = l.Split(' ');
+                        this.Host = lineSplit[1];
+                    }
+                    else if (l.Contains("User-Agent"))
+                    {
+                        var lineSplit = l.Split(' ');
+                        this.UserAgent = lineSplit[1];
+                    }
+                    else if (l.Contains("Accept"))
+                    {
+                        var lineSplit = l.Split(' ');
+                        this.Accept = lineSplit[1];
+                    }
+                    else if (l.Contains("Content-Type"))
+                    {
+                        var lineSplit = l.Split(' ');
+                        this.ContentType = lineSplit[1];
+                    }
+                    else if (l.Contains("Authorization"))
+                    {
+                        var lineSplit = l.Split(':');
+                        this.Authorization = lineSplit[1].Substring(1);
+                    }
+                    else if (l.Contains("Content-Length"))
+                    {
+                        var lineSplit = l.Split(' ');
+                        this.ContentLength = Int32.Parse(lineSplit[1]);
+                    }
+                    else if (l != "")
+                    {
+                        this.Body = l;
+                    }
+                }
+                i++;
+            }
         }
 
         public string Method;
@@ -45,5 +81,6 @@ namespace MonsterTradingCardGame.Models
         public string Authorization;
         public int ContentLength;
         public string Body;
+        public string QueryString;
     }
 }
