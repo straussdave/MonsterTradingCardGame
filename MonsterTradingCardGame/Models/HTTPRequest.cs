@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace MonsterTradingCardGame.Models
 {
-    internal class HTTPRequest
+    public class HTTPRequest
     {
 
         public HTTPRequest(string req) 

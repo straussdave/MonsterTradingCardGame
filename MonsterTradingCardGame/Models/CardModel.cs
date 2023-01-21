@@ -1,6 +1,6 @@
 ﻿namespace MonsterTradingCardGame.Models
 {
-    internal class Card
+    public class Card
     {
         public string Id { get; set; }
         public string Name { get; set; }
