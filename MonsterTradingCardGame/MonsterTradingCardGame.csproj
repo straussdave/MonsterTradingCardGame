@@ -194,6 +194,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="BattleHandler.cs" />
+    <Compile Include="BattleManager.cs" />
+    <Compile Include="CardHandler.cs" />
     <Compile Include="Models\CardModel.cs" />
     <Compile Include="Models\HTTPRequest.cs" />
     <Compile Include="Models\HTTPResponse.cs" />
@@ -202,8 +204,10 @@
     <Compile Include="Models\UserDataModel.cs" />
     <Compile Include="Models\UserModel.cs" />
     <Compile Include="Models\userStats.cs" />
+    <Compile Include="PackageHandler.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="UserHandler.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

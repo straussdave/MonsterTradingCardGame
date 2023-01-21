@@ -6,8 +6,16 @@ using System.Threading.Tasks;
 
 namespace MonsterTradingCardGame.Models
 {
-    internal class HTTPResponse
+    public class HTTPResponse
     {
+        public HTTPResponse()
+        {
+            this.Message = "";
+            this.ResponseContent = "";
+            this.StatusCode = 500;
+            this.ContentType = "";
+        }
+
         public string Message;
         public int StatusCode;
         public string ResponseContent;

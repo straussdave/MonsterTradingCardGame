@@ -1,377 +1,268 @@
-﻿using Microsoft.Extensions.Logging;
-using MonsterTradingCardGame.Models;
+﻿using MonsterTradingCardGame.Models;
+using Newtonsoft.Json;
+using Npgsql;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
-using System.Reflection;
+using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace MonsterTradingCardGame
 {
-    internal class BattleHandler
+    public class BattleHandler
     {
-        public Queue<Player> WaitingPlayers = new Queue<Player>();
-        public List<List<string>> BattleHistory = new List<List<string>>();
-        public int Enqueue(Player player)
-        {//will return the id of the battle which the user will join
-            WaitingPlayers.Enqueue(player);
-            return BattleHistory.Count;
-        }
-        public void Battle()
+        public IDbConnection connection;
+
+        public BattleHandler(IDbConnection connection)
         {
-            int roundNr = 0;
-            List<string> battleLog = new List<string>
-            {
-                BattleHistory.Count.ToString()
-            };
-            Player player1 = WaitingPlayers.Dequeue();
-            Player player2 = WaitingPlayers.Dequeue();
-
-            List<Card> player1Deck = new List<Card>();
-            List<Card> player2Deck = new List<Card>();
-            foreach(Card card in player1.Deck)
-            {
-                player1Deck.Add(card);
-            }
-            foreach(Card card in player2.Deck)
-            {
-                player2Deck.Add(card);
-            }
-
-            var random = new Random();
-
-            while(roundNr <= 100)
-            {
-                int player1Index = random.Next(player1Deck.Count);
-                Card player1FightingCard = player1Deck[player1Index];
-
-                int player2Index = random.Next(player2Deck.Count);
-                Card player2FightingCard = player2Deck[player2Index];
-
-                if (CalculateDamage(player1FightingCard, player2FightingCard) == player1FightingCard)
-                {
-                    string battleDescription =
-                        "Round " + roundNr + ": "
-                        + player1.Name + "'s card "
-                        + player1FightingCard.Name
-                        + "(" + player1FightingCard.Damage + " damage)"
-                        + " won against " + player2.Name + "'s card "
-                        + player2FightingCard.Name
-                        + "(" + player2FightingCard.Damage + " damage)";
-                    battleLog.Add(battleDescription);
-                    player1Deck.Add(player2FightingCard);
-                    player2Deck.RemoveAt(player2Index);
-                }
-                else if (CalculateDamage(player1FightingCard, player2FightingCard) == player2FightingCard)
-                {
-                    string battleDescription =
-                        "Round " + roundNr + ": "
-                        + player2.Name + "'s card "
-                        + player2FightingCard.Name
-                        + "(" + player2FightingCard.Damage + " damage)"
-                        + " won against " + player1.Name + "'s card "
-                        + player1FightingCard.Name
-                        + "(" + player1FightingCard.Damage + " damage)";
-                    battleLog.Add(battleDescription);
-                    player2Deck.Add(player1FightingCard);
-                    player1Deck.RemoveAt(player1Index);
-                }
-                roundNr++;
-
-                if (player1Deck.Count == 0)
-                {
-                    Console.WriteLine("Battle finished");
-                    battleLog.Add("result: " + player1.Name);
-                    BattleHistory.Add(battleLog);
-                    break;
-                }
-                else if (player2Deck.Count == 0)
-                {
-                    Console.WriteLine("Battle finished");
-                    battleLog.Add("result: " + player2.Name);
-                    BattleHistory.Add(battleLog);
-                    break;
-                }
-                else if (roundNr >= 100)
-                {
-                    Console.WriteLine("Battle finished");
-                    battleLog.Add("result: draw");
-                    BattleHistory.Add(battleLog);
-                    break;
-                }
-            }
+            this.connection = connection;
         }
 
-        public Card CalculateDamage(Card card1, Card card2)
+        public HTTPResponse handleRequest(HTTPRequest request, BattleManager battleManager, object _locker)
         {
-            string card1Element = GetElement(card1);
-            string card2Element = GetElement(card2);
-
-            string card1Type = GetType(card1, card1Element);
-            string card2Type = GetType(card2, card2Element);
-
-            switch (card1Type)
+            HTTPResponse response = new HTTPResponse();
+            if (request.Url == "/battles")
             {
-                case "Goblin":
-                    if(card2Type == "Dragon")
-                    {
-                        return card2;
-                    }
-                    break;
-                case "Dragon":
-                    if(card2Type == "Goblin")
-                    {
-                        return card1;
-                    }
-                    if(card2.Name == "FireElf")
-                    {
-                        return card2;
-                    }
-                    break;
-                case "Wizzard":
-                    if(card2Type == "Ork")
-                    {
-                        return card1;
-                    }
-                    break;
-                case "Ork":
-                    if (card2Type == "Wizzard")
-                    {
-                        return card2;
-                    }
-                    break;
-                case "Kraken":
-                    if (card2Type == "Spell")
-                    {
-                        return card1;
-                    }
-                    break;
-                case "Knight":
-                    if(card2.Name == "WaterSpell")
-                    {
-                        return card2;
-                    }
-                    break;
-                case "Spell":
-                    if(card1Element == "Water" && card2Type == "Knight")
-                    {
-                        return card1;
-                    }
-                    if(card2Type == "Kraken")
-                    {
-                        return card2;
-                    }
-                    break;
-                case "Elf":
-                    if(card1Element == "Fire" && card2Type == "Dragon")
-                    {
-                        return card1;
-                    }
-                    break;
-                default:
-                    break;
-            }
-
-            if(card1Type != "Spell" && card2Type != "Spell")
-            {
-                if(card1.Damage > card2.Damage)
+                switch (request.Method)
                 {
-                    return card1;
-                }
-                else if(card2.Damage > card1.Damage)
-                {
-                    return card2;
-                }
-                else if(card1.Damage == card2.Damage)
-                {
-                    return null;
-                }
-            }
-            if(card1Type == "Spell" || card2Type == "Spell")
-            {
-                switch (card1Type)
-                {
-                    case "Regular":
-                        if(card2Type == "Regular")
-                        {
-                            if (card1.Damage > card2.Damage)
-                            {
-                                return card1;
-                            }
-                            else if (card2.Damage > card1.Damage)
-                            {
-                                return card2;
-                            }
-                            else if (card1.Damage == card2.Damage)
-                            {
-                                return null;
-                            }
-                        }
-                        else if(card2Type == "Fire")
-                        {
-                            if (card1.Damage / 2 > card2.Damage * 2)
-                            {
-                                return card1;
-                            }
-                            else if (card2.Damage / 2 > card1.Damage * 2)
-                            {
-                                return card2;
-                            }
-                            else if (card1.Damage / 2 == card2.Damage * 2)
-                            {
-                                return null;
-                            }
-                        }
-                        else if(card2Type == "Water")
-                        {
-                            if (card1.Damage * 2 > card2.Damage / 2)
-                            {
-                                return card1;
-                            }
-                            else if (card2.Damage * 2 > card1.Damage / 2)
-                            {
-                                return card2;
-                            }
-                            else if (card1.Damage * 2 == card2.Damage / 2)
-                            {
-                                return null;
-                            }
-                        }
-                        break;
-                    case "Water":
-                        if (card2Type == "Regular")
-                        {
-                            if (card1.Damage / 2 > card2.Damage * 2)
-                            {
-                                return card1;
-                            }
-                            else if (card2.Damage / 2 > card1.Damage * 2)
-                            {
-                                return card2;
-                            }
-                            else if (card1.Damage / 2 == card2.Damage * 2)
-                            {
-                                return null;
-                            }
-                        }
-                        else if (card2Type == "Fire")
-                        {
-                            if (card1.Damage * 2 > card2.Damage / 2)
-                            {
-                                return card1;
-                            }
-                            else if (card2.Damage * 2 > card1.Damage / 2)
-                            {
-                                return card2;
-                            }
-                            else if (card1.Damage * 2 == card2.Damage / 2)
-                            {
-                                return null;
-                            }
-                        }
-                        else if (card2Type == "Water")
-                        {
-                            if (card1.Damage > card2.Damage)
-                            {
-                                return card1;
-                            }
-                            else if (card2.Damage > card1.Damage)
-                            {
-                                return card2;
-                            }
-                            else if (card1.Damage == card2.Damage)
-                            {
-                                return null;
-                            }
-                        }
-                        break;
-                    case "Fire":
-                        if (card2Type == "Regular")
-                        {
-                            if (card1.Damage * 2 > card2.Damage / 2)
-                            {
-                                return card1;
-                            }
-                            else if (card2.Damage * 2 > card1.Damage / 2)
-                            {
-                                return card2;
-                            }
-                            else if (card1.Damage * 2 == card2.Damage / 2)
-                            {
-                                return null;
-                            }
-                        }
-                        else if (card2Type == "Fire")
-                        {
-                            if (card1.Damage > card2.Damage)
-                            {
-                                return card1;
-                            }
-                            else if (card2.Damage > card1.Damage)
-                            {
-                                return card2;
-                            }
-                            else if (card1.Damage == card2.Damage)
-                            {
-                                return null;
-                            }
-                        }
-                        else if (card2Type == "Water")
-                        {
-                            if (card1.Damage / 2 > card2.Damage * 2)
-                            {
-                                return card1;
-                            }
-                            else if (card2.Damage / 2 > card1.Damage * 2)
-                            {
-                                return card2;
-                            }
-                            else if (card1.Damage / 2 == card2.Damage * 2)
-                            {
-                                return null;
-                            }
-                        }
+                    case "POST":
+                        response = HandleBattle(request, battleManager, _locker);
                         break;
                     default:
                         break;
                 }
             }
-            return null;
+            else if (request.Url == "/stats")
+            {
+                switch (request.Method)
+                {
+                    case "GET":
+                        response = GetStats(request);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            else if (request.Url == "/score")
+            {
+                switch (request.Method)
+                {
+                    case "GET":
+                        response = GetScoreboard(request);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            return response;
         }
 
-        public string GetElement(Card card)
+        public HTTPResponse HandleBattle(HTTPRequest request, BattleManager battleManager, object _locker)
         {
-            if (card.Name.Contains("Fire"))
+            //1. get player cards, store it in player variable
+            //2. pass this player variable to battlemanager to store in queue
+            //3. wait for battle to start/finish
+            HTTPResponse response = new HTTPResponse();
+            string header = request.Authorization;
+            int startOfToken = header.IndexOf("Bearer ") + 7;
+            string user = header.Substring(startOfToken, header.IndexOf("-") - startOfToken);
+            bool hasCards = false;
+            List<Card> deck = new List<Card>();
+            IDbCommand command = null;
+            int userid;
+
+            lock (_locker)
             {
-                return "Fire";
+                command = connection.CreateCommand();
+                command.CommandText = "SELECT uid FROM users WHERE username = @usernameParam";
+                NpgsqlCommand c = command as NpgsqlCommand;
+
+                IDbDataParameter usernameParam = c.CreateParameter();
+                usernameParam.DbType = DbType.String;
+                usernameParam.ParameterName = "usernameParam";
+                c.Parameters.Add(usernameParam);
+                c.Parameters["usernameParam"].Value = user;
+                userid = Convert.ToInt16(c.ExecuteScalar());
+
+                c.CommandText = "SELECT cards.id, cards.name, cards.damage " +
+                                "FROM users JOIN stacks ON users.uid = stacks.userid " +
+                                "JOIN cards ON cards.id = stacks.carduuid " +
+                                "WHERE users.uid = @uid AND stacks.is_current_deck = true";
+
+                IDbDataParameter uid = c.CreateParameter();
+                uid.DbType = DbType.Int32;
+                uid.ParameterName = "uid";
+                c.Parameters.Add(uid);
+                c.Parameters["uid"].Value = userid;
+
+                using (IDataReader reader = c.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        Card newCard = new Card();
+                        newCard.Id = reader["id"] as string;
+                        newCard.Name = reader["name"] as string;
+                        newCard.Damage = (float)Convert.ToDecimal(reader["damage"]);
+                        deck.Add(newCard);
+                        hasCards = true;
+                    }
+                }
             }
-            else if (card.Name.Contains("Water"))
+
+            if (!hasCards)
             {
-                return "Water";
+                response.StatusCode = (int)HttpStatusCode.NoContent;
+                response.Message = "The request was fine, but the deck doesn't have any cards";
+                return response;
             }
-            else if (card.Name.Contains("Regular"))
+            Player player = new Player();
+            List<string> log = new List<string>();
+            player.Name = user;
+            player.Deck = deck;
+            bool found = false;
+            int battleId = battleManager.Enqueue(player);
+            Console.WriteLine("Enqueued Player");
+            while (true)
             {
-                return "Regular";
+                Thread.Sleep(1000);
+
+                foreach (List<string> battleLog in battleManager.BattleHistory)
+                {
+                    if (battleLog.ElementAt(0) == battleId.ToString())
+                    {
+                        found = true;
+                        response.ResponseContent = JsonConvert.SerializeObject(battleLog, Formatting.Indented);
+                        log = battleLog;
+                    }
+                }
+                if (found)
+                    break;
             }
-            else
+
+            if (log.Contains("result: draw")) //draw
             {
-                return "Regular";
+                Console.WriteLine("result is draw");
+                response.StatusCode = (int)HttpStatusCode.OK;
+                response.Message = "The battle has been carried out successfully.";
+                return response;
+            }
+            else if (log.Contains("result: " + user)) //win
+            {
+                lock (_locker)
+                {
+                    NpgsqlCommand c = command as NpgsqlCommand;
+                    c.CommandText = "UPDATE users SET elo = elo + 3, wins = wins + 1 WHERE uid = @useridParam";
+                    IDbDataParameter useridParam = c.CreateParameter();
+                    useridParam.DbType = DbType.Int32;
+                    useridParam.ParameterName = "useridParam";
+                    c.Parameters.Add(useridParam);
+                    c.Parameters["useridParam"].Value = userid;
+
+                    c.ExecuteNonQuery();
+                }
+            }
+            else //lose
+            {
+                lock (_locker)
+                {
+                    NpgsqlCommand c = command as NpgsqlCommand;
+                    c.CommandText = "UPDATE users SET elo = elo - 5, losses = losses + 1 WHERE uid = @useridParam";
+                    IDbDataParameter useridParam = c.CreateParameter();
+                    useridParam.DbType = DbType.Int32;
+                    useridParam.ParameterName = "useridParam";
+                    c.Parameters.Add(useridParam);
+                    c.Parameters["useridParam"].Value = userid;
+
+                    c.ExecuteNonQuery();
+                }
+            }
+
+            response.StatusCode = (int)HttpStatusCode.OK;
+            response.Message = "The battle has been carried out successfully.";
+            return response;
+        }
+
+        public HTTPResponse GetStats(HTTPRequest request)
+        {
+            HTTPResponse response = new HTTPResponse();
+            string header = request.Authorization;
+            int startOfToken = header.IndexOf("Bearer ") + 7;
+            string user = header.Substring(startOfToken, header.IndexOf("-") - startOfToken);
+
+            IDbCommand command = connection.CreateCommand();
+            command.CommandText = "SELECT name, elo, wins, losses FROM users WHERE username = @usernameParam";
+
+            NpgsqlCommand c = command as NpgsqlCommand;
+
+            IDbDataParameter usernameParam = c.CreateParameter();
+            usernameParam.DbType = DbType.String;
+            usernameParam.ParameterName = "usernameParam";
+            c.Parameters.Add(usernameParam);
+            c.Prepare();
+            c.Parameters["usernameParam"].Value = user;
+
+            using (IDataReader reader = c.ExecuteReader())
+            {
+                if (!reader.Read())
+                {
+                    // No match found
+                    response.StatusCode = (int)HttpStatusCode.NotFound;
+                    response.Message = "User not found";
+                    return response;
+                }
+                else
+                {
+                    //retrieve user data
+                    string name = reader["name"].ToString();
+                    string elo = reader["elo"].ToString();
+                    int wins = (int)reader["wins"];
+                    int losses = (int)reader["losses"];
+                    userStats stats = new userStats();
+                    stats.Name = name;
+                    stats.Elo = elo;
+                    stats.Wins = wins;
+                    stats.Losses = losses;
+
+                    response.ResponseContent = JsonConvert.SerializeObject(stats);
+
+                    response.StatusCode = (int)HttpStatusCode.OK;
+                    response.Message = "The stats could be retrieved successfully.";
+
+                    return response;
+                }
             }
         }
 
-        public string GetType(Card card, string element)
+        public HTTPResponse GetScoreboard(HTTPRequest request)
         {
-            if(!card.Name.Contains("Fire") || !card.Name.Contains("Water") || !card.Name.Contains("Regular"))
+            HTTPResponse response = new HTTPResponse();
+            IDbCommand command = connection.CreateCommand();
+            command.CommandText = "SELECT name, elo FROM users ORDER BY elo DESC";
+
+            NpgsqlCommand c = command as NpgsqlCommand;
+
+            List<string[]> scoreboard = new List<string[]>();
+            using (IDataReader reader = c.ExecuteReader())
             {
-                return card.Name;
+                while (reader.Read())
+                {
+                    string[] new_entry = { reader["name"].ToString(), reader["elo"].ToString() };
+                    if (reader["name"].ToString() == "")
+                    {
+                        new_entry[0] = "anonymous";
+                    }
+                    scoreboard.Add(new_entry);
+                }
             }
-            else
-            {
-                return card.Name.Substring(element.Length);
-            }
+            response.ResponseContent = JsonConvert.SerializeObject(scoreboard, Formatting.Indented);
+            response.StatusCode = (int)HttpStatusCode.OK;
+            response.Message = "The scoreboard could be retrieved successfully.";
+            return response;
         }
+
 
     }
 }

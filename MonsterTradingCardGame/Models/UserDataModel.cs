@@ -2,7 +2,7 @@
 
 namespace MonsterTradingCardGame.Models
 {
-    internal class UserData
+    public class UserData
     {
         //The variables start with upper case to get the correct format in JSON output
         public string Name { get; set; } 
